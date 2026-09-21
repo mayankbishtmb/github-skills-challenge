@@ -140,6 +140,19 @@ def test_run_pipeline_processes_records(tmp_path):
     assert result["events_consumed"] == []
 
 
+def test_run_pipeline_handles_empty_data(tmp_path):
+    data_file = tmp_path / "records.json"
+    data_file.write_text("[]", encoding="utf-8")
+
+    result = run_pipeline(data_file)
+
+    assert result == {
+        "records_processed": 0,
+        "anomalies_detected": [],
+        "events_consumed": []
+    }
+
+
 def test_pipeline_script_runs(capsys, monkeypatch):
     monkeypatch.syspath_prepend("src")
     runpy.run_path("src/aiops_pipeline.py", run_name="__main__")
