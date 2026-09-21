@@ -1,7 +1,8 @@
-from pathlib import Path
+import json
+import runpy
 
 from src.anomaly_detector import AnomalyDetector
-from src.aiops_pipeline import run_pipeline
+from src.aiops_pipeline import load_data, run_pipeline
 from src.event_consumer import EventConsumer
 from src.event_producer import EventProducer
 from src.event_topic import EventTopic
@@ -70,3 +71,79 @@ def test_consumer_receives_event():
     messages = consumer.consume()
 
     assert len(messages) == 1
+
+
+def test_detector_reports_each_anomaly_reason():
+    detector = AnomalyDetector()
+
+    record = {
+        "timestamp": "2026-09-20T10:00:00",
+        "service": "payment-service",
+        "response_time_ms": 501,
+        "cpu_percent": 81,
+        "memory_percent": 81,
+        "log_level": "WARNING",
+        "message": "Payment service warning"
+    }
+
+    event = detector.detect(record)
+
+    assert event["reasons"] == [
+        "High response time",
+        "High CPU utilization",
+        "High memory utilization",
+        "Error log detected"
+    ]
+
+
+def test_producer_rejects_empty_event():
+    topic = EventTopic("anomaly-events")
+    producer = EventProducer(topic)
+
+    assert producer.publish(None) is False
+    assert topic.get_messages() == []
+
+
+def test_topic_clear_removes_messages():
+    topic = EventTopic("anomaly-events")
+    topic.publish({"type": "ANOMALY"})
+
+    topic.clear()
+
+    assert topic.get_messages() == []
+
+
+def test_load_data_reads_json(tmp_path):
+    data_file = tmp_path / "records.json"
+    expected = [{"service": "payment-service"}]
+    data_file.write_text(json.dumps(expected), encoding="utf-8")
+
+    assert load_data(data_file) == expected
+
+
+def test_run_pipeline_processes_records(tmp_path):
+    data_file = tmp_path / "records.json"
+    data_file.write_text(json.dumps([{
+        "timestamp": "2026-09-20T10:00:00",
+        "service": "payment-service",
+        "response_time_ms": 600,
+        "cpu_percent": 40,
+        "memory_percent": 40,
+        "log_level": "ERROR",
+        "message": "Payment service timeout"
+    }]), encoding="utf-8")
+
+    result = run_pipeline(data_file)
+
+    assert result["records_processed"] == 1
+    assert len(result["anomalies_detected"]) == 1
+    assert result["events_consumed"] == []
+
+
+def test_pipeline_script_runs(capsys, monkeypatch):
+    monkeypatch.syspath_prepend("src")
+    runpy.run_path("src/aiops_pipeline.py", run_name="__main__")
+
+    output = capsys.readouterr().out
+
+    assert "AIOps Pipeline Result" in output

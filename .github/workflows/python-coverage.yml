@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   python-coverage:
+    env:
+      PYTHONPATH: .
+
     runs-on: ubuntu-latest
 
     steps:
