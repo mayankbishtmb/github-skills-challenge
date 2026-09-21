@@ -19,7 +19,42 @@ env:
 jobs:
   find_exercise:
     name: Find Exercise Issue
-    uses: skills/exercise-toolkit/.github/workflows/find-exercise-issue.yml@v0.7.0
+    runs-on: ubuntu-latest
+    outputs:
+      issue-number: ${{ steps.find-exercise.outputs.issue-number }}
+    steps:
+      - name: Find exercise by issue title
+        id: find-exercise
+        uses: actions/github-script@v7
+        env:
+          ISSUE_TITLE_PREFIX: Exercise
+        with:
+          script: |
+            const response = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              sort: 'created',
+              direction: 'desc',
+              per_page: 50
+            });
+
+            const issues = response.data.filter(item => !item.pull_request);
+            core.startGroup(`Found ${issues.length} issues in total`);
+            issues.forEach(issue => {
+              core.info(`#${issue.number}: ${issue.html_url}`);
+            });
+            core.endGroup();
+
+            const issue = issues.find(issue => issue.title.includes(process.env.ISSUE_TITLE_PREFIX));
+            if (!issue) {
+              core.warning('No exercise issue found. Continuing without issue comments.');
+              core.setOutput('issue-number', '');
+              return;
+            }
+
+            core.info(`Exercise issue found: #${issue.number} (${issue.html_url})`);
+            core.setOutput('issue-number', String(issue.number));
 
   check_step_work:
     name: Check step work
@@ -41,6 +76,7 @@ jobs:
           ref: v0.7.0
 
       - name: Find last comment
+        if: env.ISSUE_NUMBER != ''
         id: find-last-comment
         uses: peter-evans/find-comment@v3
         with:
@@ -49,6 +85,7 @@ jobs:
           direction: last
 
       - name: Update comment - checking work
+        if: env.ISSUE_NUMBER != ''
         uses: GrantBirki/comment@v2.1.1
         with:
           repository: ${{ env.ISSUE_REPOSITORY }}
@@ -78,6 +115,7 @@ jobs:
           case-sensitive: false
 
       - name: Update comment - step results
+        if: env.ISSUE_NUMBER != ''
         uses: GrantBirki/comment@v2.1.1
         with:
           repository: ${{ env.ISSUE_REPOSITORY }}
@@ -99,6 +137,7 @@ jobs:
 
   post_next_step_content:
     name: Post next step content
+    if: needs.find_exercise.outputs.issue-number != ''
     needs: [find_exercise, check_step_work]
     runs-on: ubuntu-latest
     env:
